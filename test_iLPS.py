@@ -29,7 +29,8 @@ train_loader = torch.utils.data.DataLoader(dataset, batch_size=bsize,
                                            shuffle=True, num_workers=1,
                                            pin_memory=True)
 w = 41
-thre_prob = 0.5
+thre_conf = 0.999
+os = 16
 D = md.iLPSclassifier(input_size = w)
 D.load_state_dict(torch.load('model/os1_classifier_w41.w'))
 L1error = 0
@@ -37,6 +38,7 @@ L2error = 0
 L1errorm = 0
 L2errorm = 0
 num_testdata =  dataset.__len__()
+d_shift = 13 #need to be modified
 for i, (train_data) in enumerate(train_loader):
     #print train_data['X'][0], train_data['Y'][0],train_data['offset'][0]
     #uinput = Variable(train_data['X']).float()
@@ -46,20 +48,27 @@ for i, (train_data) in enumerate(train_loader):
     target = Variable(train_data['testdist']).float()
     length = totalinput.shape[2]
     #print totalinput.shape
+    possible_ontime = np.zeros((1,length))
+    possible_early = np.zeros((1,length))
+    possible_late = np.zeros((1,length))
+    possible_noise = np.zeros((1,length))
     possible_pos = np.zeros((1,length))
     posidx = np.arange(1,length+1,1)
-    conti = 0
-    visit = 0
     for j in range(length-w):
         output = D(totalinput[:,:,j:j+w])
         #print output,j
-        if output[0,0,2]>output[0,0,3] and output[0,0,2]>output[0,0,0] and output[0,0,2]>output[0,0,1] and output[0,0,2]> thre_prob and (visit+conti)%2 == 0:
-            possible_pos[0,j+40] = output[0,0,2].detach().numpy()
-            conti = 1
-            visit = 1
-        else:
-            conti = 0
-    result_pos = sum(sum(possible_pos*posidx))/sum(sum(possible_pos))*3.75/16
+        possible_ontime[0,j+int((w-1)/2)] = output[0,0,2].detach().numpy()
+        possible_early[0,j+int((w-1)/2)] = output[0,0,1].detach().numpy()
+        possible_late[0,j+int((w-1)/2)] = output[0,0,3].detach().numpy()
+        possible_noise[0,j+int((w-1)/2)] = output[0,0,0].detach().numpy()
+    for k in range(int((w-1)/2),length-int((w-1)/2)):
+        possible_pos[0,k] = possible_ontime[0,k]*possible_early[0,k-int((w-1)/2)]*possible_late[0,k+int((w-1)/2)]*(1-possible_noise[0,k])
+    maxidx = np.argmax(possible_pos)
+    confident_idx = np.zeros((1,length))
+    for k in range(int((w-1)/2),length-int((w-1)/2)):
+        if possible_pos[0,k] > possible_pos[0,maxidx]*thre_conf:
+            confident_idx[0,k] = 1
+    result_pos = sum(sum(possible_pos*posidx*confident_idx))/sum(sum(possible_pos*confident_idx))*3.75/os
     diff = result_pos - target.detach().numpy()
     #print diff
     maxidx = np.argmax(totalinput.detach().numpy())
@@ -77,7 +86,4 @@ print L2error/num_testdata
 print 'Find max result:'
 print L1errorm/num_testdata
 print L2errorm/num_testdata
-
-#G = torch.load('G_model.w')
-
 
